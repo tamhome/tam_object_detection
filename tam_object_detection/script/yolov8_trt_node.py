@@ -12,7 +12,6 @@ import roslib
 import rospy
 import torch
 from geometry_msgs.msg import Point, Pose, Quaternion
-from hsrlib.rosif import ROSInterfaces
 from image_geometry import PinholeCameraModel
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import Header
@@ -85,8 +84,6 @@ class YOLOv8TensorRT(Node):
         # Library
         self.bridge = CvBridge()
         self.tamtf = Transform()
-        self.rosif = ROSInterfaces()
-        self.rosif.sub.auto_setup()
 
         # Publisher
         self.pub_register("result_image", "object_detection/image", Image)
@@ -106,9 +103,9 @@ class YOLOv8TensorRT(Node):
             self.sub_register("msg_rgb", p_rgb_topic, callback_func=self.subf_rgb)
 
     def subf_camera_info(self, camera_info: CameraInfo) -> None:
-        self.camera_info = self.rosif.sub.head_rgbd_camera_info()
+        self.camera_info = camera_info
         self.camera_model = PinholeCameraModel()
-        self.camera_model.fromCameraInfo(self.camera_info)
+        self.camera_model.fromCameraInfo(camera_info)
         self.camera_frame_id = camera_info.header.frame_id
         self.sub.camera_info.unregister()
 
