@@ -6,7 +6,7 @@
 hoge.pt -> hoge.onnx -> hoge.engine
 ```
 
-必ず Singularity 内で行うこと
+必ず Singularity 内で行うこと．--nv フラグを忘れないこと．
 
 ### 0. ディレクトリ移動
 
