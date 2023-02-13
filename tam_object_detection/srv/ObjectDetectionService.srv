@@ -4,4 +4,4 @@ bool use_latest_image
 float32 max_distance
 string specific_id
 ---
-ObjectDetection result
+ObjectDetection detections

@@ -90,10 +90,9 @@ class YOLOv8TensorRT(Node):
         self.pub_register("result", "object_detection/detection", ObjectDetection)
 
         # Subscriber
-        self.camera_info = CameraInfo()
-        self.sub_register(
-            "camera_info", p_camera_info_topic, callback_func=self.subf_camera_info
-        )
+        self.camera_info = rospy.wait_for_message(p_camera_info_topic, CameraInfo)
+        self.set_camera_model(self.camera_info)
+
         self.msg_rgb = CompressedImage()
         if self.p_use_depth:
             self.msg_depth = CompressedImage()
@@ -102,12 +101,10 @@ class YOLOv8TensorRT(Node):
         else:
             self.sub_register("msg_rgb", p_rgb_topic, callback_func=self.subf_rgb)
 
-    def subf_camera_info(self, camera_info: CameraInfo) -> None:
-        self.camera_info = camera_info
+    def set_camera_model(self, camera_info: CameraInfo) -> None:
         self.camera_model = PinholeCameraModel()
         self.camera_model.fromCameraInfo(camera_info)
         self.camera_frame_id = camera_info.header.frame_id
-        self.sub.camera_info.unregister()
 
     def subf_rgb(self, rgb: CompressedImage) -> None:
         self.msg_rgb = rgb
@@ -392,33 +389,34 @@ class YOLOv8TensorRT(Node):
             num (int): 検出数．
 
         Returns:
-            List[CompressedImage]: segmentメッセージ．
+            List[CompressedImage]: segmentメッセージリスト．
         """
         mask = self.mask.to("cpu").detach().numpy().copy() * 255
         mask_split = np.split(mask, num)
-        seg_msg = []
+        seg_msgs = []
         for i in range(num):
             m = mask_split[i].reshape((self.camera_info.height, self.camera_info.width))
-            seg_msg.append(self.bridge.cv2_to_compressed_imgmsg(m))
-        return seg_msg
+            seg_msg = self.bridge.cv2_to_compressed_imgmsg(m)
+            seg_msgs.append(seg_msg)
+        return seg_msgs
 
     def create_object_detection_msg(
         self,
-        cv_bgr: np.ndarray,
+        msg_rgb: CompressedImage,
         bboxes: Tensor,
         scores: Tensor,
         labels: Tensor,
-        cv_depth: Optional[np.ndarray] = None,
+        msg_depth: Optional[np.ndarray] = None,
         poses: Optional[List] = None,
     ) -> ObjectDetection:
         """ObjectDetection.msgを作成する
 
         Args:
-            cv_bgr (np.ndarray): RGB画像．
+            msg_rgb (CompressedImage): RGBメッセージ．
             bboxes (Tensor): BBox情報．
             scores (Tensor): スコア情報．
             labels (Tensor): ラベル情報．
-            cv_depth (Optional[np.ndarray], optional): Depth画像. Defaults to None.
+            msg_depth (Optional[CompressedImage, optional): Depthメッセージ. Defaults to None.
             poses (Optional[List], optional): 3次元座標リスト. Defaults to None.
 
         Returns:
@@ -429,7 +427,7 @@ class YOLOv8TensorRT(Node):
         msg.header.stamp = rospy.Time.now()
         msg.header.frame_id = self.camera_frame_id
         msg.is_detected = True
-        msg.rgb = self.bridge.cv2_to_compressed_imgmsg(cv_bgr)
+        msg.rgb = msg_rgb
         if self.p_use_segment:
             msg.segments = self.create_segment_msg(len(bboxes))
         for bbox, score, label in zip(bboxes, scores, labels):
@@ -443,8 +441,8 @@ class YOLOv8TensorRT(Node):
             msg.bbox[-1].y = int(y)
             msg.bbox[-1].w = int(w)
             msg.bbox[-1].h = int(h)
-        if cv_depth is not None and poses is not None:
-            msg.depth = self.bridge.cv2_to_compressed_imgmsg(cv_depth)
+        if msg_depth is not None and poses is not None:
+            msg.depth = msg_depth
             for pose in poses:
                 msg.pose.append(Pose3D())
                 if pose is None:
@@ -478,6 +476,7 @@ class YOLOv8TensorRT(Node):
         if self.p_use_latest_image:
             self.wait_for_message("msg_rgb")
         cv_bgr = self.cv_bgr
+        msg_rgb = self.msg_rgb
 
         # 推論
         try:
@@ -501,6 +500,7 @@ class YOLOv8TensorRT(Node):
             if not hasattr(self, "cv_depth"):
                 return
             cv_depth = self.cv_depth
+            msg_depth = self.msg_depth
 
             # 3次元座標の取得
             poses = self.get_3d_poses(cv_depth, bboxes)
@@ -517,7 +517,7 @@ class YOLOv8TensorRT(Node):
             if self.p_show_tf and poses != []:
                 self.show_tf(poses, labels)
         else:
-            cv_depth = None
+            msg_depth = None
             poses = None
 
         # 可視化
@@ -527,7 +527,7 @@ class YOLOv8TensorRT(Node):
 
         # 推論結果
         result = self.create_object_detection_msg(
-            cv_bgr, bboxes, scores, labels, cv_depth, poses
+            msg_rgb, bboxes, scores, labels, msg_depth, poses
         )
         self.pub.result.publish(result)
 

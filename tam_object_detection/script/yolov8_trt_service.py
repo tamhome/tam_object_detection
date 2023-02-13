@@ -8,7 +8,10 @@ from typing import Any
 import roslib
 import rospy
 from tam_object_detection.msg import ObjectDetection
-from tam_object_detection.srv import ObjectDetectionService
+from tam_object_detection.srv import (
+    ObjectDetectionService,
+    ObjectDetectionServiceResponse,
+)
 from yolov8_trt_node import YOLOv8TensorRT
 
 sys.path.append(
@@ -29,18 +32,21 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
         self.srv_detection = rospy.Service(
             "object_detection/service", ObjectDetectionService, self.run
         )
+        self.loginfo("ObjectDetection Service is ready.")
 
     def set_params(self, req: Any):
         if req.confidence_th <= 0:
-            self.logwarn("confidence_th must be positive")
-            self.loginfo(
-                f"use the default value [{self.p_confidence_th}] for confidence_th"
-            )
+            # self.logwarn("confidence_th must be positive")
+            # self.loginfo(
+            #     f"use the default value [{self.p_confidence_th}] for confidence_th"
+            # )
+            pass
         else:
             self.p_confidence_th = req.confidence_th
         if req.iou_th <= 0:
-            self.logwarn("iou_th must be positive")
-            self.loginfo(f"use the default value [{self.p_iou_th}] for iou_th")
+            # self.logwarn("iou_th must be positive")
+            # self.loginfo(f"use the default value [{self.p_iou_th}] for iou_th")
+            pass
         else:
             self.p_iou_th = req.iou_th
         self.p_use_latest_image = req.use_latest_image
@@ -53,15 +59,18 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
         msg.is_detected = False
         return msg
 
-    def run(self, req) -> ObjectDetection:
+    def run(self, req) -> ObjectDetectionServiceResponse:
         self.set_params(req)
 
         # RGB画像取得
-        if not hasattr(self, "cv_bgr"):
-            return
-        if self.p_use_latest_image:
-            self.wait_for_message("msg_rgb")
-        cv_bgr = self.cv_bgr
+        while not rospy.is_shutdown():
+            if not hasattr(self, "cv_bgr"):
+                continue
+            if self.p_use_latest_image:
+                self.wait_for_message("msg_rgb")
+            cv_bgr = self.cv_bgr
+            msg_rgb = self.msg_rgb
+            break
 
         # 推論
         try:
@@ -72,7 +81,6 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
 
         # 特定ラベルのみ抽出
         if self.p_specific_id != "":
-            print("aa")
             bboxes, scores, labels, masks = self.filter_elements_by_id(
                 self.p_specific_id, bboxes, scores, labels, masks
             )
@@ -84,6 +92,7 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
             if not hasattr(self, "cv_depth"):
                 return
             cv_depth = self.cv_depth
+            msg_depth = self.msg_depth
 
             # 3次元座標の取得
             poses = self.get_3d_poses(cv_depth, bboxes)
@@ -99,7 +108,7 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
             if self.p_show_tf and poses != []:
                 self.show_tf(poses, labels)
         else:
-            cv_depth = None
+            msg_depth = None
             poses = None
 
         # 可視化
@@ -108,8 +117,9 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
         self.pub.result_image.publish(msg_result)
 
         # 推論結果
-        result = self.create_object_detection_msg(
-            cv_bgr, bboxes, scores, labels, cv_depth, poses
+        result = ObjectDetectionServiceResponse()
+        result.detections = self.create_object_detection_msg(
+            msg_rgb, bboxes, scores, labels, msg_depth, poses
         )
         return result
 
