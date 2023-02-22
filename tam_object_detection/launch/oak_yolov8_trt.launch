@@ -1,15 +1,15 @@
 <launch>
     <arg name="class_names_path" default="$(find tam_object_detection)/io/config/wrc_ycb_class_names.txt"/>
-    <arg name="weight_path" default="$(find tam_object_detection)/io/models/yolov8-seg_wrc_ycb.engine"/>
+    <arg name="weight_path" default="$(find tam_object_detection)/io/models/yolov8-seg_wrc_ycb_mono.engine"/>
     <arg name="device" default="cuda:0"/>
     <arg name="confidence_th" default="0.3"/>
-    <arg name="iou_th" default="0.65"/>
-    <arg name="topk" default="100"/>
+    <arg name="iou_th" default="0.5"/>
+    <arg name="topk" default="5"/>
 
-    <arg name="camera_info_topic" default="/hsrb/head_rgbd_sensor/rgb/camera_info"/>
-    <arg name="rgb_topic" default="/relay/hsrb/head_rgbd_sensor/rgb/image_rect_color/compressed"/>
+    <arg name="camera_info_topic" default="/oak/camera_info"/>
+    <arg name="rgb_topic" default="/oak/mono"/>
     <arg name="use_depth" default="true"/>
-    <arg name="depth_topic" default="/relay/hsrb/head_rgbd_sensor/depth_registered/image_rect_raw/compressedDepth"/>
+    <arg name="depth_topic" default="/oak/depth/compressedDepth"/>
 
     <arg name="use_segment" default="true"/>
     <arg name="use_latest_image" default="true"/>
