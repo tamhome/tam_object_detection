@@ -30,7 +30,7 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
 
         # Service
         self.srv_detection = rospy.Service(
-            "object_detection/service", ObjectDetectionService, self.run
+            f"{self.p_action_name}/service", ObjectDetectionService, self.run
         )
         self.loginfo("ObjectDetection Service is ready.")
 
@@ -60,68 +60,78 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
         return msg
 
     def run(self, req) -> ObjectDetectionServiceResponse:
-        self.set_params(req)
-
-        # RGB画像取得
-        while not rospy.is_shutdown():
-            if not hasattr(self, "cv_bgr"):
-                continue
-            if self.p_use_latest_image:
-                self.wait_for_message("msg_rgb")
-            cv_bgr = self.cv_bgr
-            msg_rgb = self.msg_rgb
-            break
-
-        # 推論
         try:
-            bboxes, scores, labels, masks = self.inference(cv_bgr)
-        except Exception:
-            self.logwarn("No objects detected.")
-            return self.return_no_objects()
+            self.set_params(req)
 
-        # 特定ラベルのみ抽出
-        if self.p_specific_id != "":
-            bboxes, scores, labels, masks = self.filter_elements_by_id(
-                self.p_specific_id, bboxes, scores, labels, masks
+            # RGB画像取得
+            while not rospy.is_shutdown():
+                if not hasattr(self, "cv_bgr"):
+                    continue
+                if self.p_use_latest_image:
+                    self.wait_for_message("msg_rgb")
+                cv_bgr = self.cv_bgr
+                msg_rgb = self.msg_rgb
+                break
+
+            # 推論
+            try:
+                bboxes, scores, labels, masks = self.inference(cv_bgr)
+            except Exception:
+                self.logwarn("No objects detected.")
+                return self.return_no_objects()
+
+            # top k
+            bboxes, scores, labels, masks = self.filter_elements_by_topk(
+                self.p_topk, bboxes, scores, labels, masks
             )
-        if len(bboxes) == 0:
-            return self.return_no_objects()
 
-        # Depth画像処理
-        if self.p_use_depth:
-            if not hasattr(self, "cv_depth"):
-                return
-            cv_depth = self.cv_depth
-            msg_depth = self.msg_depth
-
-            # 3次元座標の取得
-            poses = self.get_3d_poses(cv_depth, bboxes)
-
-            # 座標の無い結果の削除
-            bboxes, scores, labels, masks = self.filter_elements_by_pose(
-                poses, bboxes, scores, labels, masks
-            )
+            # 特定ラベルのみ抽出
+            if self.p_specific_id != "":
+                bboxes, scores, labels, masks = self.filter_elements_by_id(
+                    self.p_specific_id, bboxes, scores, labels, masks
+                )
             if len(bboxes) == 0:
                 return self.return_no_objects()
 
-            # TF配信
-            if self.p_show_tf and poses != []:
-                self.show_tf(poses, labels)
-        else:
-            msg_depth = None
-            poses = None
+            # Depth画像処理
+            if self.p_use_depth:
+                if not hasattr(self, "cv_depth"):
+                    return
+                cv_depth = self.cv_depth
+                msg_depth = self.msg_depth
 
-        # 可視化
-        cv_result = self.visualize(cv_bgr, bboxes, labels, masks)
-        msg_result = self.bridge.cv2_to_imgmsg(cv_result)
-        self.pub.result_image.publish(msg_result)
+                # 3次元座標の取得
+                poses = self.get_3d_poses(cv_depth, bboxes)
 
-        # 推論結果
-        result = ObjectDetectionServiceResponse()
-        result.detections = self.create_object_detection_msg(
-            msg_rgb, bboxes, scores, labels, msg_depth, poses
-        )
-        return result
+                # 座標の無い結果の削除
+                poses, bboxes, scores, labels, masks = self.filter_elements_by_pose(
+                    poses, bboxes, scores, labels, masks
+                )
+                if len(bboxes) == 0:
+                    return self.return_no_objects()
+
+                # TF配信
+                if self.p_show_tf and poses != []:
+                    self.show_tf(poses, labels)
+            else:
+                msg_depth = None
+                poses = None
+
+            # 可視化
+            cv_result = self.visualize(cv_bgr, bboxes, labels, masks)
+            msg_result = self.bridge.cv2_to_imgmsg(cv_result)
+            self.pub.result_image.publish(msg_result)
+
+            # 推論結果
+            result = ObjectDetectionServiceResponse()
+            result.detections = self.create_object_detection_msg(
+                msg_rgb, bboxes, scores, labels, msg_depth, poses
+            )
+            return result
+
+        except Exception as e:
+            self.logerr(e)
+            return self.return_no_objects()
 
 
 def main():
@@ -133,12 +143,6 @@ def main():
     cls = YOLOv8TensorRTService()
     rospy.on_shutdown(cls.delete)
     while not rospy.is_shutdown():
-        try:
-            # cls.run()
-            pass
-        except rospy.exceptions.ROSException as e:
-            rospy.logerr(f"[{rospy.get_name()}]: FAILURE")
-            rospy.logerr(e)
         loop_wait.sleep()
 
 

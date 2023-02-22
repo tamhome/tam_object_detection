@@ -18,6 +18,7 @@ from std_msgs.msg import Header
 from tam_object_detection.msg import BBox, ObjectDetection, Pose3D
 from tamlib.cv_bridge import CvBridge
 from tamlib.node_template import Node
+from tamlib.open3d import Open3D
 from tamlib.tf import Transform
 from torch import Tensor
 
@@ -36,6 +37,7 @@ class YOLOv8TensorRT(Node):
         super().__init__()
 
         # Parameters
+        self.p_action_name = rospy.get_param("~action_name", "object_detection")
         p_class_names_path = rospy.get_param(
             "~class_names_path",
             osp.join(
@@ -53,6 +55,7 @@ class YOLOv8TensorRT(Node):
         self.p_device = rospy.get_param("~device", "cuda:0")
         self.p_confidence_th = rospy.get_param("~confidence_th", 0.3)
         self.p_iou_th = rospy.get_param("~iou_th", 0.65)
+        self.p_topk = rospy.get_param("~topk", 100)
 
         p_camera_info_topic = rospy.get_param(
             "~camera_info_topic", "/camera/rgb/camera_info"
@@ -84,10 +87,11 @@ class YOLOv8TensorRT(Node):
         # Library
         self.bridge = CvBridge()
         self.tamtf = Transform()
+        self.open3d = Open3D()
 
         # Publisher
         self.pub_register("result_image", "object_detection/image", Image)
-        self.pub_register("result", "object_detection/detection", ObjectDetection)
+        self.pub_register("result", f"{self.p_action_name}/detection", ObjectDetection)
 
         # Subscriber
         self.camera_info = rospy.wait_for_message(p_camera_info_topic, CameraInfo)
@@ -183,6 +187,24 @@ class YOLOv8TensorRT(Node):
 
         return bboxes, scores, labels, masks
 
+    def filter_elements_by_topk(
+        self,
+        topk: int,
+        bboxes: Tensor,
+        scores: Tensor,
+        labels: Tensor,
+        masks: Optional[List[Tensor]],
+    ) -> Tuple[Tensor, Tensor, Tensor, Optional[List[Tensor]]]:
+        if len(scores) <= topk:
+            return bboxes, scores, labels, masks
+
+        return (
+            bboxes[:topk],
+            scores[:topk],
+            labels[:topk],
+            [masks[0][:topk], masks[1][:topk]],
+        )
+
     def filter_elements_by_id(
         self,
         ids: str,
@@ -234,7 +256,7 @@ class YOLOv8TensorRT(Node):
         scores: Tensor,
         labels: Tensor,
         masks: Optional[List[Tensor]],
-    ) -> Tuple[Tensor, Tensor, Tensor, Optional[List[Tensor]]]:
+    ) -> Tuple[List[Pose], Tensor, Tensor, Tensor, Optional[List[Tensor]]]:
         """座標のある結果のみを抽出する
 
         Args:
@@ -245,13 +267,13 @@ class YOLOv8TensorRT(Node):
             masks (Optional[List[Tensor]]): マスク情報．
 
         Returns:
-            Tuple[Tensor, Tensor, Tensor, Optional[List[Tensor]]]: 抽出結果．
+            Tuple[List[Pose], Tensor, Tensor, Tensor, Optional[List[Tensor]]]: 抽出結果．
         """
-        indices = torch.tensor(
-            [i for i, x in enumerate(poses) if x is not None], device=self.p_device
-        )
+        indices = [i for i, x in enumerate(poses) if x is not None]
+        indices_tensor = torch.tensor(indices, device=self.p_device)
         if len(indices) == 0:
             return (
+                [],
                 torch.tensor([]),
                 torch.tensor([]),
                 torch.tensor([]),
@@ -259,17 +281,19 @@ class YOLOv8TensorRT(Node):
             )
         elif masks is None:
             return (
-                bboxes[indices],
-                scores[indices],
-                labels[indices],
+                np.array(poses)[indices].tolist(),
+                bboxes[indices_tensor],
+                scores[indices_tensor],
+                labels[indices_tensor],
                 None,
             )
         else:
             return (
-                bboxes[indices],
-                scores[indices],
-                labels[indices],
-                [masks[0][indices], masks[1][indices]],
+                np.array(poses)[indices].tolist(),
+                bboxes[indices_tensor],
+                scores[indices_tensor],
+                labels[indices_tensor],
+                [masks[0][indices_tensor], masks[1][indices_tensor]],
             )
 
     def visualize(
@@ -343,7 +367,7 @@ class YOLOv8TensorRT(Node):
         for box in bboxes:
             w, h = box[2] - box[0], box[3] - box[1]
             cx, cy = int(box[0] + w / 2), int(box[1] + h / 2)
-            crop_depth = depth[cy - 1 : cy + 2, cx - 1 : cx + 2] * 0.001
+            crop_depth = depth[cy - 2 : cy + 3, cx - 2 : cx + 3] * 0.001
             flat_depth = crop_depth[crop_depth != 0].flatten()
             if len(flat_depth) == 0:
                 poses.append(None)
@@ -427,6 +451,7 @@ class YOLOv8TensorRT(Node):
         msg.header.stamp = rospy.Time.now()
         msg.header.frame_id = self.camera_frame_id
         msg.is_detected = True
+        msg.camera_info = self.camera_info
         msg.rgb = msg_rgb
         if self.p_use_segment:
             msg.segments = self.create_segment_msg(len(bboxes))
@@ -486,6 +511,11 @@ class YOLOv8TensorRT(Node):
             self.pub_no_objects(cv_bgr)
             return
 
+        # top k
+        bboxes, scores, labels, masks = self.filter_elements_by_topk(
+            self.p_topk, bboxes, scores, labels, masks
+        )
+
         # 特定ラベルのみ抽出
         if self.p_specific_id != "":
             bboxes, scores, labels, masks = self.filter_elements_by_id(
@@ -502,11 +532,14 @@ class YOLOv8TensorRT(Node):
             cv_depth = self.cv_depth
             msg_depth = self.msg_depth
 
+            if cv_depth is None:
+                return
+
             # 3次元座標の取得
             poses = self.get_3d_poses(cv_depth, bboxes)
 
             # 座標の無い結果の削除
-            bboxes, scores, labels, masks = self.filter_elements_by_pose(
+            poses, bboxes, scores, labels, masks = self.filter_elements_by_pose(
                 poses, bboxes, scores, labels, masks
             )
             if len(bboxes) == 0:
