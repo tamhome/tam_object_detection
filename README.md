@@ -1,5 +1,8 @@
 # tam_object_detection
 
+## Trained model
+https://drive.google.com/drive/folders/14dEhn8K4RCnkLzO9gL6ehuJ4zIIoEwJ4?usp=share_link
+
 ## YOLOv8 のモデル変換
 
 ```
