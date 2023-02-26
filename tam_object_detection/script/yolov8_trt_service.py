@@ -54,7 +54,10 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
             self.p_max_distance = req.max_distance
         self.p_specific_id = req.specific_id
 
-    def return_no_objects(self):
+    def return_no_objects(self, bgr=None):
+        if bgr is not None:
+            msg_rgb = self.bridge.cv2_to_imgmsg(bgr)
+            self.pub.result_image.publish(msg_rgb)
         msg = ObjectDetection()
         msg.is_detected = False
         return msg
@@ -78,7 +81,12 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
                 bboxes, scores, labels, masks = self.inference(cv_bgr)
             except Exception:
                 self.logwarn("No objects detected.")
-                return self.return_no_objects()
+                return self.return_no_objects(cv_bgr)
+
+            # size validation
+            bboxes, scores, labels, masks = self.filter_elements_by_area_ratio(
+                self.p_max_area_raito, bboxes, scores, labels, masks
+            )
 
             # top k
             bboxes, scores, labels, masks = self.filter_elements_by_topk(
@@ -91,7 +99,7 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
                     self.p_specific_id, bboxes, scores, labels, masks
                 )
             if len(bboxes) == 0:
-                return self.return_no_objects()
+                return self.return_no_objects(cv_bgr)
 
             # Depth画像処理
             if self.p_use_depth:
@@ -108,7 +116,7 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
                     poses, bboxes, scores, labels, masks
                 )
                 if len(bboxes) == 0:
-                    return self.return_no_objects()
+                    return self.return_no_objects(cv_bgr)
 
                 # TF配信
                 if self.p_show_tf and poses != []:

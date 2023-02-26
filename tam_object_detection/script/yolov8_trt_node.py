@@ -55,6 +55,7 @@ class YOLOv8TensorRT(Node):
         self.p_device = rospy.get_param("~device", "cuda:0")
         self.p_confidence_th = rospy.get_param("~confidence_th", 0.3)
         self.p_iou_th = rospy.get_param("~iou_th", 0.65)
+        self.p_max_area_raito = rospy.get_param("~max_area_ratio", 0.3)
         self.p_topk = rospy.get_param("~topk", 100)
 
         p_camera_info_topic = rospy.get_param(
@@ -186,6 +187,46 @@ class YOLOv8TensorRT(Node):
         bboxes /= ratio
 
         return bboxes, scores, labels, masks
+
+    def filter_elements_by_area_ratio(
+        self,
+        area_ratio: int,
+        bboxes: Tensor,
+        scores: Tensor,
+        labels: Tensor,
+        masks: Optional[List[Tensor]],
+    ) -> Tuple[Tensor, Tensor, Tensor, Optional[List[Tensor]]]:
+        max_area = self.camera_info.width * self.camera_info.height * area_ratio
+        indices = torch.tensor(
+            [
+                i
+                for i, bbox in enumerate(bboxes)
+                if (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) <= max_area
+            ],
+            device=self.p_device,
+        )
+
+        if len(indices) == 0:
+            return (
+                torch.tensor([]),
+                torch.tensor([]),
+                torch.tensor([]),
+                None,
+            )
+        elif masks is None:
+            return (
+                bboxes[indices],
+                scores[indices],
+                labels[indices],
+                None,
+            )
+        else:
+            return (
+                bboxes[indices],
+                scores[indices],
+                labels[indices],
+                [masks[0][indices], masks[1][indices]],
+            )
 
     def filter_elements_by_topk(
         self,
@@ -342,7 +383,7 @@ class YOLOv8TensorRT(Node):
             cv2.rectangle(result_image, bbox[:2], bbox[2:], color, 2)
             cv2.putText(
                 result_image,
-                cls,
+                f"{label}:{cls}",
                 (bbox[0], bbox[1] - 2),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
@@ -510,6 +551,11 @@ class YOLOv8TensorRT(Node):
             self.logwarn("No objects detected.")
             self.pub_no_objects(cv_bgr)
             return
+
+        # size validation
+        bboxes, scores, labels, masks = self.filter_elements_by_area_ratio(
+            self.p_max_area_raito, bboxes, scores, labels, masks
+        )
 
         # top k
         bboxes, scores, labels, masks = self.filter_elements_by_topk(

@@ -4,6 +4,7 @@
     <arg name="device" default="cuda:0"/>
     <arg name="confidence_th" default="0.3"/>
     <arg name="iou_th" default="0.65"/>
+    <arg name="max_area_ratio" default="0.3"/>
     <arg name="topk" default="100"/>
 
     <arg name="camera_info_topic" default="/hsrb/head_rgbd_sensor/rgb/camera_info"/>
@@ -23,6 +24,7 @@
         <arg name="device" default="$(arg device)"/>
         <arg name="confidence_th" default="$(arg confidence_th)"/>
         <arg name="iou_th" default="$(arg iou_th)"/>
+        <arg name="max_area_ratio" default="$(arg max_area_ratio)"/>
         <arg name="topk" default="$(arg topk)"/>
 
         <arg name="camera_info_topic" default="$(arg camera_info_topic)"/>

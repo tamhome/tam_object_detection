@@ -7,6 +7,7 @@
     <arg name="device" default="cuda:0"/>
     <arg name="confidence_th" default="0.3"/>
     <arg name="iou_th" default="0.65"/>
+    <arg name="max_area_ratio" default="0.3"/>
     <arg name="topk" default="100"/>
 
     <arg name="camera_info_topic" default="/camera/rgb/camera_info"/>
@@ -28,6 +29,7 @@
         <param name="/device" type="str" value="$(arg device)"/>
         <param name="/confidence_th" type="double" value="$(arg confidence_th)"/>
         <param name="/iou_th" type="double" value="$(arg iou_th)"/>
+        <param name="/max_area_ratio" type="double" value="$(arg max_area_ratio)"/>
         <param name="/topk" type="int" value="$(arg topk)"/>
 
         <param name="/camera_info_topic" type="str" value="$(arg camera_info_topic)"/>
