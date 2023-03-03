@@ -34,24 +34,30 @@ class YOLOv8TensorRTService(YOLOv8TensorRT):
         )
         self.loginfo("ObjectDetection Service is ready.")
 
+        self.p_confidence_th_default = self.p_confidence_th
+        self.p_iou_th_default = self.p_iou_th
+        self.p_max_distance_default = self.p_max_distance
+
     def set_params(self, req: Any):
         if req.confidence_th <= 0:
             # self.logwarn("confidence_th must be positive")
             # self.loginfo(
             #     f"use the default value [{self.p_confidence_th}] for confidence_th"
             # )
-            pass
+            self.p_confidence_th = self.p_confidence_th_default
         else:
             self.p_confidence_th = req.confidence_th
         if req.iou_th <= 0:
             # self.logwarn("iou_th must be positive")
             # self.loginfo(f"use the default value [{self.p_iou_th}] for iou_th")
-            pass
+            self.p_iou_th = self.p_iou_th_default
         else:
             self.p_iou_th = req.iou_th
         self.p_use_latest_image = req.use_latest_image
         if req.max_distance != 0:
             self.p_max_distance = req.max_distance
+        else:
+            self.p_max_distance = self.p_max_distance_default
         self.p_specific_id = req.specific_id
 
     def return_no_objects(self, bgr=None):
