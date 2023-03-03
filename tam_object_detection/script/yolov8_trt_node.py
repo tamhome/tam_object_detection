@@ -386,8 +386,9 @@ class YOLOv8TensorRT(Node):
                 f"{label}:{cls}",
                 (bbox[0], bbox[1] - 2),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                1.0,
                 [0, 0, 0],
+                # [255, 255, 255],
                 thickness=2,
             )
 
