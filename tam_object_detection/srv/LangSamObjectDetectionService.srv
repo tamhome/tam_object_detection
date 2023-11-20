@@ -1,0 +1,8 @@
+float32 confidence_th
+float32 iou_th
+bool use_latest_image
+float32 max_distance
+string specific_id
+string prompt
+---
+ObjectDetection detections

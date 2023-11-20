@@ -1,9 +1,9 @@
 <launch>
-    <arg name="node_name" default="yolov8_trt_service"/>
-    <arg name="action_name" default="hsr_head_rgbd/object_detection"/>
+    <arg name="node_name" default="lang_sam_service"/>
+    <arg name="action_name" default="grounding_dino/object_detection"/>
 
-    <arg name="class_names_path" default="$(find tam_object_detection)/io/config/wrc_ycb_class_names.txt"/>
-    <arg name="weight_path" default="$(find tam_object_detection)/io/models/yolov8-seg_wrc_ycb.engine"/>
+    <arg name="config_path" default="$(find tam_object_detection)/io/groundingdino/config/GroundingDINO_SwinT_OGC.py"/>
+    <arg name="weight_path" default="$(find tam_object_detection)/io/groundingdino/weights/groundingdino_swint_ogc.pth"/>
     <arg name="device" default="cuda:0"/>
     <arg name="confidence_th" default="0.3"/>
     <arg name="iou_th" default="0.65"/>
@@ -21,10 +21,9 @@
     <arg name="max_distance" default="-1"/>
     <arg name="specific_id" default=""/>
 
-    <node pkg="tam_object_detection" type="yolov8_trt_service.py" name="$(arg node_name)" output="screen">
+    <node pkg="tam_object_detection" type="lang_sam_detection_service.py" name="$(arg node_name)" output="screen">
         <param name="/action_name" type="str" value="$(arg action_name)"/>
-
-        <param name="/class_names_path" type="str" value="$(arg class_names_path)"/>
+        <param name="/config_path" type="str" value="$(arg config_path)"/>
         <param name="/weight_path" type="str" value="$(arg weight_path)"/>
         <param name="/device" type="str" value="$(arg device)"/>
         <param name="/confidence_th" type="double" value="$(arg confidence_th)"/>

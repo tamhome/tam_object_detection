@@ -1,7 +1,7 @@
 <launch>
-    <arg name="action_name" default="hsr_head_rgbd/object_detection"/>
-    <arg name="class_names_path" default="$(find tam_object_detection)/io/config/wrc_ycb_class_names.txt"/>
-    <arg name="weight_path" default="$(find tam_object_detection)/io/models/yolov8-seg_wrc_ycb.engine"/>
+    <arg name="action_name" default="hsr_head_rgbd/lang_sam/object_detection"/>
+    <arg name="config_path" default="$(find tam_object_detection)/io/groundingdino/config/GroundingDINO_SwinT_OGC.py"/>
+    <arg name="weight_path" default="$(find tam_object_detection)/io/groundingdino/weights/groundingdino_swint_ogc.pth"/>
     <arg name="device" default="cuda:0"/>
     <arg name="confidence_th" default="0.1"/>
     <arg name="iou_th" default="0.5"/>
@@ -15,13 +15,13 @@
 
     <arg name="use_segment" default="true"/>
     <arg name="use_latest_image" default="true"/>
-    <arg name="show_tf" default="false"/>
+    <arg name="show_tf" default="true"/>
     <arg name="max_distance" default="-1"/>
     <arg name="specific_id" default=""/>
 
-    <include file="$(find tam_object_detection)/launch/include/yolov8_trt_service.launch">
+    <include file="$(find tam_object_detection)/launch/include/lang_sam.launch">
         <arg name="action_name" default="$(arg action_name)"/>
-        <arg name="class_names_path" default="$(arg class_names_path)"/>
+        <arg name="config_path" default="$(arg config_path)"/>
         <arg name="weight_path" default="$(arg weight_path)"/>
         <arg name="device" default="$(arg device)"/>
         <arg name="confidence_th" default="$(arg confidence_th)"/>
