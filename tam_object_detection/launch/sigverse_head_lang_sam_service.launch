@@ -1,0 +1,43 @@
+<launch>
+    <arg name="action_name" default="hsr_head_rgbd/lang_sam/object_detection"/>
+    <arg name="config_path" default="$(find tam_object_detection)/io/groundingdino/config/GroundingDINO_SwinT_OGC.py"/>
+    <arg name="weight_path" default="$(find tam_object_detection)/io/groundingdino/weights/groundingdino_swint_ogc.pth"/>
+    <arg name="device" default="cuda:0"/>
+    <arg name="confidence_th" default="0.1"/>
+    <arg name="iou_th" default="0.5"/>
+    <arg name="max_area_ratio" default="0.3"/>
+    <arg name="topk" default="100"/>
+
+    <arg name="camera_info_topic" default="/hsrb/head_rgbd_sensor/rgb/camera_info"/>
+    <arg name="rgb_topic" default="/hsrb/head_rgbd_sensor/rgb/image_compressed/compressed"/>
+    <arg name="use_depth" default="true"/>
+    <arg name="depth_topic" default="/hsrb/head_rgbd_sensor/depth_registered/image_compressed/compressedDepth"/>
+
+    <arg name="use_segment" default="true"/>
+    <arg name="use_latest_image" default="true"/>
+    <arg name="show_tf" default="true"/>
+    <arg name="max_distance" default="-1"/>
+    <arg name="specific_id" default=""/>
+
+    <include file="$(find tam_object_detection)/launch/include/lang_sam.launch">
+        <arg name="action_name" default="$(arg action_name)"/>
+        <arg name="config_path" default="$(arg config_path)"/>
+        <arg name="weight_path" default="$(arg weight_path)"/>
+        <arg name="device" default="$(arg device)"/>
+        <arg name="confidence_th" default="$(arg confidence_th)"/>
+        <arg name="iou_th" default="$(arg iou_th)"/>
+        <arg name="max_area_ratio" default="$(arg max_area_ratio)"/>
+        <arg name="topk" default="$(arg topk)"/>
+
+        <arg name="camera_info_topic" default="$(arg camera_info_topic)"/>
+        <arg name="rgb_topic" default="$(arg rgb_topic)"/>
+        <arg name="use_depth" default="$(arg use_depth)"/>
+        <arg name="depth_topic" default="$(arg depth_topic)"/>
+
+        <arg name="use_segment" default="$(arg use_segment)"/>
+        <arg name="use_latest_image" default="$(arg use_latest_image)"/>
+        <arg name="show_tf" default="$(arg show_tf)"/>
+        <arg name="max_distance" default="$(arg max_distance)"/>
+        <arg name="specific_id" default="$(arg specific_id)"/>
+    </include>
+</launch>
