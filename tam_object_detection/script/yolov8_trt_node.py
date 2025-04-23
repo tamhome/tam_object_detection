@@ -378,8 +378,14 @@ class YOLOv8TensorRT(Node):
 
         for (bbox, label) in zip(bboxes, labels):
             bbox = bbox.round().int().tolist()
-            cls = self.class_names[int(label)]
-            color = self.colors[cls]
+            try:
+                cls = self.class_names[int(label)]
+                color = self.colors[cls]
+            except IndexError as e:
+                self.logdebug(e)
+                self.logdebug(f"unknown label detected: {label}")
+                cls = "unknown"
+                color = [0, 0, 0]
             cv2.rectangle(result_image, bbox[:2], bbox[2:], color, 2)
             cv2.putText(
                 result_image,
@@ -433,6 +439,7 @@ class YOLOv8TensorRT(Node):
             poses (List[Optional[Pose]]): 3次元座標リスト．
             labels (Tensor): ラベル情報．
         """
+        unknown_counter = 0
         label_dict: Dict[str, int] = {}
         for pose, label in zip(poses, labels):
             label = int(label)
@@ -442,8 +449,17 @@ class YOLOv8TensorRT(Node):
                 label_dict[label] += 1
             else:
                 label_dict[label] = 1
+
+            try:
+                cls = f"{self.class_names[int(label)]}_{label_dict[label]}"
+            except IndexError as e:
+                self.logdebug(e)
+                self.logdebug(f"unknown label detected: {label}")
+                cls = f"unknown_{unknown_counter}"
+                unknown_counter += 1
+
             self.tamtf.send_transform(
-                f"{self.class_names[int(label)]}_{label_dict[label]}",
+                cls,
                 self.camera_frame_id,
                 pose,
             )
@@ -500,7 +516,11 @@ class YOLOv8TensorRT(Node):
         for bbox, score, label in zip(bboxes, scores, labels):
             msg.bbox.append(BBox())
             msg.bbox[-1].id = int(label)
-            msg.bbox[-1].name = self.class_names[int(label)]
+            try:
+                msg.bbox[-1].name = self.class_names[int(label)]
+            except IndexError as e:
+                self.logwarn(f"unknown label detected: {label}")
+                msg.bbox[-1].name = "unknown"
             msg.bbox[-1].score = float(score)
             w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
             x, y = bbox[0] + w / 2, bbox[1] + h / 2

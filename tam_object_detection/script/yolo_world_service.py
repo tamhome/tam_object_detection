@@ -2,21 +2,27 @@
 # -*- coding: utf-8 -*-
 import os
 import cv2
-import sys
 import torch
 import random
 import numpy as np
 import os.path as osp
 from torch import Tensor
-from lang_sam import LangSAM
+import supervision as sv
 from tamlib.tf import Transform
 from tamlib.open3d import Open3D
 from PIL import Image as PILImage
 import groundingdino.datasets.transforms as T
+
+from torchvision.ops import nms
+from mmyolo.registry import RUNNERS
+from mmengine.runner import Runner
+from mmengine.config import Config
+from mmengine.dataset import Compose
+from mmengine.runner.amp import autocast
+
 from typing import Any, Dict, List, Optional, Tuple
 from tam_object_detection.msg import BBox, ObjectDetection, Pose3D
 from groundingdino.util.inference import load_model, load_image, predict, annotate
-
 
 import rospy
 import roslib
@@ -31,16 +37,12 @@ from tam_object_detection.srv import LangSamObjectDetectionService
 from tam_object_detection.srv import LangSamObjectDetectionServiceResponse
 
 
-class GroundingDINOService(Node):
+class YoloWorldService(Node):
     def __init__(self) -> None:
-        super().__init__(loglevel="INFO")
-
-        self.loginfo("Language Segment Anything object detection model loading...")
-        self.lang_sam_model = LangSAM()
-        self.loginfo("Language Segment Anything object detection model loading: complete")
+        super().__init__()
 
         # Parameters
-        self.p_action_name = rospy.get_param("~action_name", "grounding_dino_object_detection")
+        self.p_action_name = rospy.get_param("~action_name", "yolo_world_object_detection")
         p_config_path = rospy.get_param(
             "~config_path",
             osp.join(
@@ -69,9 +71,6 @@ class GroundingDINOService(Node):
         self.p_depth_topic = rospy.get_param(
             "~depth_topic", "/camera/depth_registered/image_raw"
         )
-
-        self.p_rgb_topic = "/hsrb/head_rgbd_sensor/rgb/image_compressed/compressed"
-        self.p_depth_topic = "/hsrb/head_rgbd_sensor/depth_registered/image_compressed/compressedDepth"
 
         self.p_use_segment = rospy.get_param("~use_segment", True)
         self.p_use_latest_image = rospy.get_param("~use_latest_image", False)
@@ -106,27 +105,73 @@ class GroundingDINOService(Node):
         self.camera_model.fromCameraInfo(self.camera_info)
         self.camera_frame_id = self.camera_info.header.frame_id
 
-        self.logsuccess("Language Segment Anything object detection service is ready.")
+        # self.loginfo("Language Segment Anything object detection model loading...")
+        # self.lang_sam_model = LangSAM()
+        # self.logsuccess("Language Segment Anything object detection service is ready.")
 
-        # self.msg_rgb = CompressedImage()
-        # if self.p_use_depth:
-        #     self.msg_depth = CompressedImage()
-        #     topics = {"msg_rgb": self.p_rgb_topic, "msg_depth": self.p_depth_topic}
-        #     self.sync_sub_register("rgbd", topics, callback_func=self.subf_rgbd)
-        # else:
-        #     self.sub_register("msg_rgb", self.p_rgb_topic, callback_func=self.subf_rgb)
+        self.loginfo("yolo-worldの初期化")
+        cfg = Config.fromfile(p_weight_path)
+        cfg.work_dir = "."
+        cfg.load_from = p_config_path
+        runner = Runner.from_cfg(cfg)
+        runner.call_hook("before_run")
+        runner.load_or_resume()
+        pipeline = cfg.test_dataloader.dataset.pipeline
+        runner.pipeline = Compose(pipeline)
+        runner.model.eval()
 
-    def subf_rgb(self, rgb: CompressedImage) -> None:
-        self.msg_rgb = rgb
-        self.cv_bgr = self.bridge.compressed_imgmsg_to_cv2(rgb)
-        self.set_update_ros_time("msg_rgb")
+        self.bounding_box_annotator = sv.BoxAnnotator()
+        self.label_annotator = sv.LabelAnnotator(text_position=sv.Position.CENTER)
+        self.class_names = ("all")
 
-    def subf_rgbd(self, rgb: CompressedImage, depth: CompressedImage) -> None:
-        self.msg_rgb = rgb
-        self.msg_depth = depth
-        self.cv_bgr = self.bridge.compressed_imgmsg_to_cv2(rgb)
-        self.cv_depth = self.bridge.compressed_imgmsg_to_depth(depth)
-        self.set_update_ros_time("msg_rgb")
+    def save_img(self, cv_img: np.ndarray) -> str:
+        """画像を保存し，そのパスを返してくれる関数
+        """
+        cv2.imwrite(cv_img, f"{self.pkg_dir}/io/temp.png")
+        return f"{self.pkg_dir}/io/temp.png"
+
+    def run_image(self, cv_img: np.ndarray, max_num_boxes=100, score_thr=0.05, nms_thr=0.5, output_image="output.png"):
+        image_path = self.save_img(cv_img=cv_img)
+        texts = [[t.strip()] for t in self.class_names.split(",")] + [[" "]]
+        data_info = self.runner.pipeline(dict(img_id=0, img_path=image_path, texts=texts))
+
+        data_batch = dict(
+            inputs=data_info["inputs"].unsqueeze(0),
+            data_samples=[data_info["data_samples"]],
+        )
+
+        with autocast(enabled=False), torch.no_grad():
+            output = self.runner.model.test_step(data_batch)[0]
+            self.runner.model.class_names = texts
+            pred_instances = output.pred_instances
+
+        keep_idxs = nms(pred_instances.bboxes, pred_instances.scores, iou_threshold=nms_thr)
+        pred_instances = pred_instances[keep_idxs]
+        pred_instances = pred_instances[pred_instances.scores.float() > score_thr]
+
+        if len(pred_instances.scores) > max_num_boxes:
+            indices = pred_instances.scores.float().topk(max_num_boxes)[1]
+            pred_instances = pred_instances[indices]
+        output.pred_instances = pred_instances
+
+        pred_instances = pred_instances.cpu().numpy()
+        detections = sv.Detections(
+            xyxy=pred_instances['bboxes'],
+            class_id=pred_instances['labels'],
+            confidence=pred_instances['scores']
+        )
+
+        labels = [
+            f"{class_id} {confidence:0.2f}"
+            for class_id, confidence
+            in zip(detections.class_id, detections.confidence)
+        ]
+
+        image = PILImage.open(image_path)
+        svimage = np.array(image)
+        svimage = self.bounding_box_annotator.annotate(svimage, detections)
+        svimage = self.label_annotator.annotate(svimage, detections, labels)
+        return svimage[:, :, ::-1]
 
     def set_params(self, req: Any):
         if req.confidence_th <= 0:
@@ -321,11 +366,6 @@ class GroundingDINOService(Node):
             msg.segments = self.create_segment_msg(len(bboxes))
         index = 0
         for bbox, score, label in zip(bboxes, scores, labels):
-            # 認識結果のスコアがしきい値以下の場合は無視する
-            self.logdebug(f"th: {self.p_confidence_th} detection score: {score}")
-            if score < self.p_confidence_th:
-                self.logdebug("ignore this detection data")
-                continue
             msg.bbox.append(BBox())
             msg.bbox[-1].id = index
             msg.bbox[-1].name = label
@@ -402,11 +442,8 @@ class GroundingDINOService(Node):
             while not rospy.is_shutdown():
                 if self.p_use_latest_image:
                     self.logdebug("wait for new message")
-                    self.loginfo(self.p_rgb_topic)
                     self.msg_rgb = rospy.wait_for_message(self.p_rgb_topic, CompressedImage)
-                    self.loginfo(self.p_depth_topic)
                     self.msg_depth = rospy.wait_for_message(self.p_depth_topic, CompressedImage)
-                    self.logdebug("convert to cv")
                     self.cv_bgr = self.bridge.compressed_imgmsg_to_cv2(self.msg_rgb)
                     self.cv_depth = self.bridge.compressed_imgmsg_to_depth(self.msg_depth)
 
@@ -424,7 +461,6 @@ class GroundingDINOService(Node):
                 tensor_masks, tensor_bboxes, labels, scores = self.lang_sam_model.predict(
                     pil_rgb, self.p_prompt
                 )
-                self.loginfo("get_bbox")
                 # maskの整形
                 masks_np = [mask.squeeze().cpu().numpy().astype(np.uint8)*255 for mask in tensor_masks]
                 masks = []
@@ -509,7 +545,7 @@ def main():
     p_loop_rate = rospy.get_param(rospy.get_name() + "/loop_rate", 30)
     loop_wait = rospy.Rate(p_loop_rate)
 
-    cls = GroundingDINOService()
+    cls = YoloWorldService()
     rospy.on_shutdown(cls.delete)
     while not rospy.is_shutdown():
         loop_wait.sleep()
