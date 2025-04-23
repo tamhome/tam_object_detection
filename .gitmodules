@@ -1,3 +1,6 @@
 [submodule "third_party/YOLOv8-TensorRT"]
 	path = third_party/YOLOv8-TensorRT
 	url = https://github.com/triple-Mu/YOLOv8-TensorRT.git
+[submodule "third_party/GroundingDINO"]
+	path = third_party/GroundingDINO
+	url = https://github.com/IDEA-Research/GroundingDINO.git
